@@ -1,0 +1,8 @@
+spring:
+  application:
+    name: sse
+server:
+  port: 8080
+
+topic:
+  list: app1,app2,app3
