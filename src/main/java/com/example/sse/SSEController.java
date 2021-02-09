@@ -4,19 +4,22 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.yaml.snakeyaml.emitter.Emitter;
 
 import javax.annotation.PostConstruct;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
+import static com.google.common.collect.MoreCollectors.onlyElement;
 
 @RestController
 @RequestMapping("/sse/mvc")
 public class SSEController {
 
-    private Map<String, SseEmitter> map = new HashMap<>();
+    //private Map<String, SseEmitter> map = new HashMap<>();
     private Map<String, Map<String, SseEmitter>> topic = new HashMap<>();
 
     @Value("${topic.list}")
@@ -32,42 +35,58 @@ public class SSEController {
         }
     }
 
-    @GetMapping(value = "/streams/client/{topic}/{id}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter getEvents(@PathVariable("topic") String topic, @PathVariable("id") String id) {
+    @GetMapping(value = "/streams/client/{topic}/{uid}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter getEvents(@PathVariable("topic") String topic, @PathVariable("uid") String id) {
         if (this.topic.containsKey(topic)) {
             SseEmitter emitter = new SseEmitter(360_000L);//keep connection open for 360 seconds
-            Map<String, SseEmitter> inner = new HashMap<>();
-            inner.put(id, emitter);
+            Map<String, SseEmitter> connectionPool = new HashMap<>();
+            connectionPool.put(id, emitter);
             if (this.topic.get(topic) != null) {
-                inner = this.topic.get(topic);
-                inner.put(id, emitter);
+                connectionPool = this.topic.get(topic);
+                connectionPool.put(id, emitter);
             } else {
                 //first connection
-                inner.put(id, emitter);
-                this.topic.put(topic, inner);
+                connectionPool.put(id, emitter);
+                this.topic.put(topic, connectionPool);
             }
-            emitter.onCompletion(() -> map.remove(id));
-            emitter.onTimeout(() -> map.remove(id));
+
+            Map<String, SseEmitter> finalConnectionPool = connectionPool;
+            emitter.onCompletion(() -> finalConnectionPool.remove(id));
+            emitter.onTimeout(() -> finalConnectionPool.remove(id));
+            //OnError
+           // emitter.onError(()->finalConnectionPool.remove(id));
             return emitter;
+        }else{
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
         }
-        return null;
+
     }
 
     @RequestMapping(value = "/streams/push", method = RequestMethod.POST)
     @ResponseStatus(value = HttpStatus.OK)
     public void postMessage(@RequestBody Notification notification) {
-        Map<String, SseEmitter> temp = this.topic.get(notification.getTopic());
-        Map<String, SseEmitter> sseMap = temp.entrySet().stream()
+        Map<String, SseEmitter> topic = this.topic.get(notification.getTopic());
+        SseEmitter connection = topic.entrySet().stream()
                 .filter(v -> v.getKey().equals(notification.getUid()))
-                .collect(Collectors.toMap(e -> e.getKey(), e -> e.getValue()));
+                .collect(Collectors.toMap(e -> e.getKey(), e -> e.getValue()))
+                .values().stream().findFirst().orElse(null);
 
-        sseMap.values().forEach(v -> {
-            try {
-                v.send(notification.getMessage());
-            } catch (IOException e) {
-                map.remove(notification.getUid());
-            }
-        });
+        /*SseEmitter connectionUsingGuava = topic.entrySet().stream()
+                .filter(v -> v.getKey().equals(notification.getUid()))
+                .collect(Collectors.toMap(e -> e.getKey(), e -> e.getValue()))
+                .values()
+                .stream()
+                .collect(onlyElement());*/
+
+
+        try {
+            connection.send(notification.getMessage());
+        } catch (IOException e) {
+            // Remove from connection pool
+            //topic.remove(notification.getUid());
+
+        }
+
     }
 
 
