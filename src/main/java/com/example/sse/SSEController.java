@@ -12,8 +12,10 @@ import javax.annotation.PostConstruct;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
-import static com.google.common.collect.MoreCollectors.onlyElement;
+
 
 @RestController
 @RequestMapping("/sse/mvc")
@@ -36,55 +38,76 @@ public class SSEController {
     }
 
     @GetMapping(value = "/streams/client/{topic}/{uid}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter getEvents(@PathVariable("topic") String topic, @PathVariable("uid") String id) {
+    public SseEmitter clientConnect(@PathVariable("topic") String topic, @PathVariable("uid") String id) {
+        SseEmitter emitter = new SseEmitter(360_000L);//keep connection open for 360 seconds
+
+
         if (this.topic.containsKey(topic)) {
-            SseEmitter emitter = new SseEmitter(360_000L);//keep connection open for 360 seconds
-            Map<String, SseEmitter> connectionPool = new HashMap<>();
-            connectionPool.put(id, emitter);
+
+            Map<String, SseEmitter> connectionPool;
             if (this.topic.get(topic) != null) {
                 connectionPool = this.topic.get(topic);
                 connectionPool.put(id, emitter);
+                System.out.println("Connection count->" + connectionPool.size());
             } else {
                 //first connection
+                connectionPool = new ConcurrentHashMap<>();
                 connectionPool.put(id, emitter);
                 this.topic.put(topic, connectionPool);
             }
 
             Map<String, SseEmitter> finalConnectionPool = connectionPool;
-            emitter.onCompletion(() -> finalConnectionPool.remove(id));
-            emitter.onTimeout(() -> finalConnectionPool.remove(id));
+            emitter.onCompletion(() -> {
+                System.out.println("On Completion is called");
+                finalConnectionPool.remove(id);
+                System.out.println("Connection count->" + finalConnectionPool.size());
+            });
+            emitter.onTimeout(() -> {
+                System.out.println("On Timeout is called");
+                finalConnectionPool.remove(id);
+                System.out.println("Connection count->" + finalConnectionPool.size());
+
+            });
+            Consumer<Throwable> consumer = t -> {
+                System.out.println("On Error is called");
+                finalConnectionPool.remove(id);
+                System.out.println("Connection count->" + finalConnectionPool.size());
+            };
             //OnError
-           // emitter.onError(()->finalConnectionPool.remove(id));
+            emitter.onError(consumer);
+
             return emitter;
-        }else{
+        } else {
+
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
         }
 
+
     }
 
-    @RequestMapping(value = "/streams/push", method = RequestMethod.POST)
+    @RequestMapping(value = "/streams/push/{topic}/{uid}", method = RequestMethod.POST)
     @ResponseStatus(value = HttpStatus.OK)
-    public void postMessage(@RequestBody Notification notification) {
-        Map<String, SseEmitter> topic = this.topic.get(notification.getTopic());
+    public void postMessage(@RequestBody Notification notification, @PathVariable("topic") String topicName, @PathVariable("uid") String uid) {
+        Map<String, SseEmitter> topic = this.topic.get(topicName);
         SseEmitter connection = topic.entrySet().stream()
-                .filter(v -> v.getKey().equals(notification.getUid()))
+                .filter(v -> v.getKey().equals(uid))
                 .collect(Collectors.toMap(e -> e.getKey(), e -> e.getValue()))
                 .values().stream().findFirst().orElse(null);
-
-        /*SseEmitter connectionUsingGuava = topic.entrySet().stream()
-                .filter(v -> v.getKey().equals(notification.getUid()))
-                .collect(Collectors.toMap(e -> e.getKey(), e -> e.getValue()))
-                .values()
-                .stream()
-                .collect(onlyElement());*/
-
-
         try {
             connection.send(notification.getMessage());
         } catch (IOException e) {
-            // Remove from connection pool
-            //topic.remove(notification.getUid());
 
+            //remove the uid
+          /*  topic.entrySet().stream()
+                    .filter(v -> v.getKey().equals(uid))
+                    .collect(Collectors.toMap(p -> p.getKey(), p -> p.getValue()))
+                    .entrySet().removeIf(map->map.getKey().equals(uid));*/
+            //print the size
+            int size = topic.entrySet().stream()
+                    .filter(v -> v.getKey().equals(uid))
+                    .collect(Collectors.toMap(p -> p.getKey(), p -> p.getValue()))
+                    .size();
+            System.out.println("Connection count after Push message failed ->" + size);
         }
 
     }
