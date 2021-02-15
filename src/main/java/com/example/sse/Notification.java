@@ -1,16 +1,24 @@
 package com.example.sse;
 
-import org.springframework.beans.factory.annotation.Value;
-
 public class Notification {
-    String message;
+    String pushmsg;
+    String pushtype;
 
-    public String getMessage() {
-        return message;
+
+    public String getPushmsg() {
+        return pushmsg;
     }
 
-    public void setMessage(String message) {
-        this.message = message;
+    public String getPushtype() {
+        return pushtype;
+    }
+
+    public void setPushtype(String pushtype) {
+        this.pushtype = pushtype;
+    }
+
+    public void setPushmsg(String pushmsg) {
+        this.pushmsg = pushmsg;
     }
 
 }

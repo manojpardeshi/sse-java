@@ -1,12 +1,12 @@
 package com.example.sse;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-import org.yaml.snakeyaml.emitter.Emitter;
 
 import javax.annotation.PostConstruct;
 import java.io.IOException;
@@ -27,7 +27,8 @@ public class SSEController {
     @Value("${topic.list}")
     private String[] validTopics;
 
-
+    @Autowired
+    ServiceConfigurations serviceConfig;
     // private final ExecutorService cachedThreadPool = Executors.newCachedThreadPool();
 
     @PostConstruct
@@ -35,11 +36,12 @@ public class SSEController {
         for (String m : validTopics) {
             topic.put(m, null);
         }
+
     }
 
     @GetMapping(value = "/streams/client/{topic}/{uid}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter clientConnect(@PathVariable("topic") String topic, @PathVariable("uid") String id) {
-        SseEmitter emitter = new SseEmitter(360_000L);//keep connection open for 360 seconds
+        SseEmitter emitter = new SseEmitter(Long.parseLong(serviceConfig.getTimeouts().get(topic)));
 
 
         if (this.topic.containsKey(topic)) {
@@ -94,14 +96,14 @@ public class SSEController {
                 .collect(Collectors.toMap(e -> e.getKey(), e -> e.getValue()))
                 .values().stream().findFirst().orElse(null);
         try {
-            connection.send(notification.getMessage());
+            connection.send(notification);
         } catch (IOException e) {
 
             //remove the uid
-          /*  topic.entrySet().stream()
+            topic.entrySet().stream()
                     .filter(v -> v.getKey().equals(uid))
                     .collect(Collectors.toMap(p -> p.getKey(), p -> p.getValue()))
-                    .entrySet().removeIf(map->map.getKey().equals(uid));*/
+                    .entrySet().removeIf(map -> map.getKey().equals(uid));
             //print the size
             int size = topic.entrySet().stream()
                     .filter(v -> v.getKey().equals(uid))
