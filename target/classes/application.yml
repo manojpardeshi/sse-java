@@ -6,3 +6,7 @@ server:
 
 topic:
   list: app1,app2,app3
+  timeouts:
+    app1: 120000
+    app2: 120000
+    app3: 120000
